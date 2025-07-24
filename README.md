@@ -5,9 +5,10 @@
 ## ✨ 特性
 
 - 🎯 **轻量化设计**：零外部依赖，核心代码精简，不增加项目负担
-- 🚀 **开箱即用**：简单配置即可启用，无需复杂的环境搭建
+- 🚀 **开箱即用**：自动配置，引入依赖即可使用，无需任何额外配置
 - 📦 **高度复用**：作为 jar 包依赖，可快速集成到多个项目中
 - 🔧 **易于维护**：独立的组件生命周期，便于版本管理和升级
+- 🛡️ **智能防护**：令牌桶算法 + 黑名单机制，双重保护应用安全
 
 ## 🛠️ 快速开始
 
@@ -29,21 +30,9 @@
 implementation 'com.example:rate-limiter-spring-boot-starter:1.0.0'
 ```
 
-### 2. 启用组件
+### 2. 直接使用
 
-在 Spring Boot 启动类上添加注解：
-
-```java
-@SpringBootApplication
-@EnableRateLimit  // 启用限流组件
-public class Application {
-    public static void main(String[] args) {
-        SpringApplication.run(Application.class, args);
-    }
-}
-```
-
-### 3. 使用注解
+**无需任何配置**！组件支持 Spring Boot 自动配置，引入依赖后即可直接使用。
 
 在需要限流的方法上添加 `@RateLimit` 注解：
 
@@ -93,16 +82,25 @@ public Response<String> drawError(@RequestBody DrawRequest request) {
 ### 示例 1：用户抽奖限流
 
 ```java
-@RateLimit(
-    key = "userId",
-    fallback = "drawError",
-    qps = 1.0,
-    blacklistCount = 1
-)
-@PostMapping("/draw")
-public Response<DrawResult> draw(@RequestBody DrawRequest request) {
-    // 抽奖业务逻辑
-    return Response.success(drawResult);
+@RestController
+@RequestMapping("/api/activity")
+public class ActivityController {
+
+    @RateLimit(
+        key = "userId",
+        fallback = "drawError",
+        qps = 1.0,
+        blacklistCount = 1
+    )
+    @PostMapping("/draw")
+    public Response<DrawResult> draw(@RequestBody DrawRequest request) {
+        // 抽奖业务逻辑
+        return Response.success(drawResult);
+    }
+
+    public Response<DrawResult> drawError(@RequestBody DrawRequest request) {
+        return Response.error("抽奖过于频繁，请稍后再试");
+    }
 }
 ```
 
@@ -119,6 +117,10 @@ public Response<Data> getData(@RequestParam String id) {
     // 获取数据逻辑
     return Response.success(data);
 }
+
+public Response<Data> globalError(@RequestParam String id) {
+    return Response.error("系统繁忙，请稍后再试");
+}
 ```
 
 ### 示例 3：IP 级限流
@@ -134,6 +136,10 @@ public Response<Data> getData(@RequestParam String id) {
 public Response<String> addComment(@RequestBody Comment comment) {
     // 评论业务逻辑
     return Response.success("评论成功");
+}
+
+public Response<String> ipLimitError(@RequestBody Comment comment) {
+    return Response.error("评论过于频繁，请稍后再试");
 }
 ```
 
@@ -163,22 +169,23 @@ public Response<String> addComment(@RequestBody Comment comment) {
     └─────────────────────────────────────────────────────────┘
 ```
 
-## 🧪 运行示例项目
+## 🧪 测试示例
 
-1. 编译组件：
+### 启动测试项目
 
 ```bash
+# 克隆项目
+git clone https://github.com/yourkin666/rate-limiter.git
+cd rate-limiter
+
+# 编译安装
 mvn clean install
+
+# 创建测试项目并启动
+# (需要创建示例项目或在现有项目中引入依赖)
 ```
 
-2. 启动示例项目：
-
-```bash
-cd example-project
-mvn spring-boot:run
-```
-
-3. 测试 API：
+### API 测试
 
 **抽奖接口测试**：
 
@@ -231,6 +238,7 @@ logging:
 2. **黑名单策略**：谨慎使用黑名单功能，避免误判正常用户
 3. **错误处理**：提供友好的限流提示信息，保证用户体验
 4. **监控告警**：监控限流触发频率，及时调整策略
+5. **回调方法**：确保 fallback 方法与原方法具有相同的参数签名
 
 ## 🚀 性能特点
 
@@ -238,6 +246,25 @@ logging:
 - **低开销**：核心代码 < 10KB，内存占用极少
 - **线程安全**：使用 ConcurrentHashMap 和同步机制保证并发安全
 - **自动清理**：过期数据自动清理，避免内存泄漏
+- **零依赖**：除 Spring Boot 外无其他外部依赖
+
+## 🤔 常见问题
+
+### Q: 如何禁用限流功能？
+
+A: 在配置文件中设置 `rate-limiter.enabled=false`
+
+### Q: 支持分布式限流吗？
+
+A: 当前版本基于本地缓存，如需分布式限流建议使用 Redis 等外部存储
+
+### Q: 黑名单数据会持久化吗？
+
+A: 黑名单基于内存缓存，应用重启后会清空
+
+### Q: 可以自定义令牌桶算法参数吗？
+
+A: 当前版本令牌桶参数固定，后续版本会开放更多自定义选项
 
 ## 📄 许可证
 
@@ -252,4 +279,5 @@ MIT License
 **组件版本**: v1.0.0  
 **适用框架**: Spring Boot 2.x+  
 **JDK 版本**: 1.8+  
-**作者**: yourkin666
+**作者**: yourkin666  
+**GitHub**: https://github.com/yourkin666/rate-limiter
