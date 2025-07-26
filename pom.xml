@@ -45,13 +45,6 @@
             <optional>true</optional>
         </dependency>
 
-        <!-- SLF4J API -->
-        <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-api</artifactId>
-            <version>1.7.36</version>
-            <scope>provided</scope>
-        </dependency>
 
         <!-- Test Dependencies -->
         <dependency>

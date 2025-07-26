@@ -7,10 +7,11 @@ import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.annotation.Pointcut;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.springframework.core.annotation.Order;
 import java.lang.reflect.Method;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 限流AOP切面
@@ -22,17 +23,16 @@ import java.lang.reflect.Method;
 @Order(1)
 public class RateLimitAOP {
 
-    private static final Logger log = LoggerFactory.getLogger(RateLimitAOP.class);
+    private static final Log log = LogFactory.getLog(RateLimitAOP.class);
 
-    /** 令牌桶缓存，1分钟过期 */
-    private final LocalCache<String, TokenBucket> bucketCache = new LocalCache<>(60 * 1000L);
+    private static final long BUCKET_TTL = 60 * 1000L; // 1分钟
+    private static final long BLACKLIST_TTL = 24 * 60 * 60 * 1000L; // 24小时
 
-    /** 黑名单缓存，24小时过期 */
-    private final LocalCache<String, Long> blacklist = new LocalCache<>(24 * 60 * 60 * 1000L);
+    private final LocalCache<String, TokenBucket> bucketCache = new LocalCache<>(BUCKET_TTL);
+    private final LocalCache<String, Long> blacklist = new LocalCache<>(BLACKLIST_TTL);
 
-    /**
-     * 定义切点：拦截所有标记了@RateLimit注解的方法
-     */
+    private final ConcurrentHashMap<String, Method> methodCache = new ConcurrentHashMap<>();
+
     @Pointcut("@annotation(com.example.ratelimiter.annotation.RateLimit)")
     public void rateLimitPointcut() {
     }
@@ -88,42 +88,51 @@ public class RateLimitAOP {
     }
 
     /**
-     * 获取方法对象
+     * 获取方法对象 - 带缓存优化
      * 
      * @param jp 连接点
      * @return 方法对象
      * @throws NoSuchMethodException 方法不存在异常
      */
     private Method getMethod(ProceedingJoinPoint jp) throws NoSuchMethodException {
-        String methodName = jp.getSignature().getName();
-        Class<?>[] parameterTypes = new Class[jp.getArgs().length];
-        Object[] args = jp.getArgs();
-        for (int i = 0; i < args.length; i++) {
-            parameterTypes[i] = args[i] != null ? args[i].getClass() : Object.class;
-        }
-        return jp.getTarget().getClass().getMethod(methodName, parameterTypes);
+        String methodKey = jp.getSignature().toLongString();
+        
+        return methodCache.computeIfAbsent(methodKey, key -> {
+            try {
+                String methodName = jp.getSignature().getName();
+                Class<?>[] parameterTypes = new Class[jp.getArgs().length];
+                Object[] args = jp.getArgs();
+                for (int i = 0; i < args.length; i++) {
+                    parameterTypes[i] = args[i] != null ? args[i].getClass() : Object.class;
+                }
+                return jp.getTarget().getClass().getMethod(methodName, parameterTypes);
+            } catch (NoSuchMethodException e) {
+                throw new RuntimeException(e);
+            }
+        });
     }
 
     /**
-     * 提取属性值
+     * 提取属性值 - 简化版
      * 
      * @param attr 属性名
      * @param args 方法参数
-     * @return 属性值，如果是"all"或参数中找不到对应属性则返回原值
+     * @return 属性值
      */
     private String getAttrValue(String attr, Object[] args) {
         if ("all".equals(attr) || args == null || args.length == 0) {
             return attr;
         }
 
-        // 简单实现：如果参数是字符串类型，则直接返回第一个参数
-        // 更复杂的实现可以通过反射获取对象的指定属性
+        // 优先查找字符串参数
         for (Object arg : args) {
             if (arg instanceof String) {
                 return (String) arg;
             }
+        }
 
-            // 如果参数是对象，尝试通过反射获取属性值
+        // 反射获取对象属性
+        for (Object arg : args) {
             if (arg != null) {
                 try {
                     java.lang.reflect.Field field = arg.getClass().getDeclaredField(attr);
@@ -132,8 +141,8 @@ public class RateLimitAOP {
                     if (value != null) {
                         return value.toString();
                     }
-                } catch (Exception e) {
-                    // 忽略反射异常，继续处理
+                } catch (Exception ignored) {
+                    // 忽略异常继续
                 }
             }
         }
@@ -142,7 +151,7 @@ public class RateLimitAOP {
     }
 
     /**
-     * 执行回调方法
+     * 执行回调方法 - 优化版
      * 
      * @param jp             连接点
      * @param fallbackMethod 回调方法名
@@ -154,13 +163,18 @@ public class RateLimitAOP {
             throw new RuntimeException("限流触发，但未配置fallback方法");
         }
 
+        String fallbackKey = jp.getTarget().getClass().getName() + "#" + fallbackMethod;
+        Method method = methodCache.computeIfAbsent(fallbackKey, key -> {
+            try {
+                Class<?>[] parameterTypes = getParameterTypes(jp);
+                return jp.getTarget().getClass().getMethod(fallbackMethod, parameterTypes);
+            } catch (NoSuchMethodException e) {
+                throw new RuntimeException("找不到fallback方法：" + fallbackMethod, e);
+            }
+        });
+
         try {
-            // 获取目标对象的回调方法
-            Method method = jp.getTarget().getClass().getMethod(fallbackMethod, getParameterTypes(jp));
             return method.invoke(jp.getTarget(), jp.getArgs());
-        } catch (NoSuchMethodException e) {
-            log.error("找不到fallback方法：{}", fallbackMethod, e);
-            throw new RuntimeException("限流触发，fallback方法不存在：" + fallbackMethod);
         } catch (Exception e) {
             log.error("执行fallback方法失败：{}", fallbackMethod, e);
             throw e;

@@ -1,8 +1,8 @@
 package com.example.ratelimiter.config;
 
 import com.example.ratelimiter.aop.RateLimitAOP;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -20,7 +20,7 @@ import org.springframework.context.annotation.EnableAspectJAutoProxy;
 @ConditionalOnProperty(name = "rate-limiter.enabled", havingValue = "true", matchIfMissing = true)
 public class RateLimiterAutoConfiguration {
 
-    private static final Logger log = LoggerFactory.getLogger(RateLimiterAutoConfiguration.class);
+    private static final Log log = LogFactory.getLog(RateLimiterAutoConfiguration.class);
 
     /**
      * 注册限流AOP切面Bean
